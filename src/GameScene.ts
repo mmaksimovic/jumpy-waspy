@@ -34,6 +34,10 @@ export class GameScene extends Phaser.Scene {
   private lastScoreY: number = 0;
   private difficultyLevel: number = 0;
   private readonly pointsPerDifficultyIncrease: number = 20;
+  private leftButton!: Phaser.GameObjects.Rectangle;
+  private rightButton!: Phaser.GameObjects.Rectangle;
+  private jumpButton!: Phaser.GameObjects.Rectangle;
+  private isMobile: boolean = false;
 
   constructor() {
     super('GameScene')
@@ -125,6 +129,13 @@ export class GameScene extends Phaser.Scene {
 
     // Initialize difficulty
     this.updateDifficulty();
+
+    // Check if the game is running on a mobile device
+    this.isMobile = this.sys.game.device.input.touch && !this.sys.game.device.input.mouse;
+
+    if (this.isMobile) {
+      this.createMobileControls();
+    }
   }
 
   update(time: number, delta: number) {
@@ -135,41 +146,10 @@ export class GameScene extends Phaser.Scene {
       this.cameras.main.setFollowOffset(0, 200);
     }
 
-    if (this.cursors.left.isDown) {
-      this.player.setVelocityX(-this.playerSpeed)
-      this.player.setFlipX(true)
-    } else if (this.cursors.right.isDown) {
-      this.player.setVelocityX(this.playerSpeed)
-      this.player.setFlipX(false)
+    if (this.isMobile) {
+      this.handleMobileControls();
     } else {
-      this.player.setVelocityX(0)
-    }
-
-    // Jump input handling
-    if (this.cursors.up.isDown && !this.jumpPressed) {
-      this.jumpPressed = true;
-      this.lastJumpPressTime = time;
-    }
-    if (this.cursors.up.isUp) {
-      this.jumpPressed = false;
-    }
-
-    // Jump logic
-    const canJump = this.player.body!.touching.down || (time - this.lastGroundedTime < this.coyoteTime);
-    if ((this.jumpPressed && canJump) || (canJump && time - this.lastJumpPressTime < this.jumpBufferTime)) {
-      this.player.setVelocityY(this.jumpVelocity);
-      this.jumpTimer = 0;
-      this.lastGroundedTime = 0; // Reset coyote time
-      this.lastJumpPressTime = 0; // Reset jump buffer
-    } else if (this.cursors.up.isDown && this.jumpTimer < this.maxJumpTime) {
-      // Continue to apply upward force while the up key is held and within max jump time
-      this.jumpTimer += delta;
-      const jumpForce = Phaser.Math.Linear(this.jumpVelocity, this.maxJumpVelocity, this.jumpTimer / this.maxJumpTime);
-      this.player.setVelocityY(jumpForce);
-    } else if (this.cursors.up.isUp && this.player.body!.velocity.y < 0) {
-      // If the up key is released while still moving upwards, reduce the upward velocity
-      this.player.setVelocityY(this.player.body!.velocity.y * 0.5);
-      this.jumpTimer = this.maxJumpTime; // End the jump
+      this.handleKeyboardControls();
     }
 
     // Update last grounded time
@@ -461,5 +441,105 @@ export class GameScene extends Phaser.Scene {
 
     // Increase chance of danger pads
     // We'll implement this in the addPlatform method
+  }
+
+  private createMobileControls() {
+    const buttonColor = 0x0000ff;
+    const buttonAlpha = 0.5;
+    const buttonWidth = 100;
+    const buttonHeight = 100;
+
+    // Create left button
+    this.leftButton = this.add.rectangle(50, this.cameras.main.height - 75, buttonWidth, buttonHeight, buttonColor)
+      .setScrollFactor(0)
+      .setAlpha(buttonAlpha)
+      .setInteractive();
+
+    // Create right button
+    this.rightButton = this.add.rectangle(175, this.cameras.main.height - 75, buttonWidth, buttonHeight, buttonColor)
+      .setScrollFactor(0)
+      .setAlpha(buttonAlpha)
+      .setInteractive();
+
+    // Create jump button
+    this.jumpButton = this.add.rectangle(this.cameras.main.width - 75, this.cameras.main.height - 75, buttonWidth, buttonHeight, buttonColor)
+      .setScrollFactor(0)
+      .setAlpha(buttonAlpha)
+      .setInteractive();
+
+    // Add text to buttons
+    this.add.text(50, this.cameras.main.height - 75, 'Left', { color: '#ffffff' })
+      .setOrigin(0.5)
+      .setScrollFactor(0);
+    this.add.text(175, this.cameras.main.height - 75, 'Right', { color: '#ffffff' })
+      .setOrigin(0.5)
+      .setScrollFactor(0);
+    this.add.text(this.cameras.main.width - 75, this.cameras.main.height - 75, 'Jump', { color: '#ffffff' })
+      .setOrigin(0.5)
+      .setScrollFactor(0);
+  }
+
+  private handleMobileControls() {
+    // Handle left movement
+    if (this.leftButton.input?.isDown) {
+      this.player.setVelocityX(-this.playerSpeed);
+      this.player.setFlipX(true);
+    }
+    // Handle right movement
+    else if (this.rightButton.input?.isDown) {
+      this.player.setVelocityX(this.playerSpeed);
+      this.player.setFlipX(false);
+    }
+    // Stop horizontal movement if no direction button is pressed
+    else {
+      this.player.setVelocityX(0);
+    }
+
+    // Handle jump
+    if (this.jumpButton.input?.isDown) {
+      this.handleJump();
+    }
+  }
+
+  private handleKeyboardControls() {
+    if (this.cursors.left.isDown) {
+      this.player.setVelocityX(-this.playerSpeed);
+      this.player.setFlipX(true);
+    } else if (this.cursors.right.isDown) {
+      this.player.setVelocityX(this.playerSpeed);
+      this.player.setFlipX(false);
+    } else {
+      this.player.setVelocityX(0);
+    }
+
+    // Jump input handling
+    if (this.cursors.up.isDown && !this.jumpPressed) {
+      this.jumpPressed = true;
+      this.lastJumpPressTime = this.time.now;
+    }
+    if (this.cursors.up.isUp) {
+      this.jumpPressed = false;
+    }
+
+    this.handleJump();
+  }
+
+  private handleJump() {
+    const canJump = this.player.body!.touching.down || (this.time.now - this.lastGroundedTime < this.coyoteTime);
+    if ((this.jumpPressed && canJump) || (canJump && this.time.now - this.lastJumpPressTime < this.jumpBufferTime)) {
+      this.player.setVelocityY(this.jumpVelocity);
+      this.jumpTimer = 0;
+      this.lastGroundedTime = 0; // Reset coyote time
+      this.lastJumpPressTime = 0; // Reset jump buffer
+    } else if (this.jumpPressed && this.jumpTimer < this.maxJumpTime) {
+      // Continue to apply upward force while the jump button is held and within max jump time
+      this.jumpTimer += this.game.loop.delta;
+      const jumpForce = Phaser.Math.Linear(this.jumpVelocity, this.maxJumpVelocity, this.jumpTimer / this.maxJumpTime);
+      this.player.setVelocityY(jumpForce);
+    } else if (!this.jumpPressed && this.player.body!.velocity.y < 0) {
+      // If the jump button is released while still moving upwards, reduce the upward velocity
+      this.player.setVelocityY(this.player.body!.velocity.y * 0.5);
+      this.jumpTimer = this.maxJumpTime; // End the jump
+    }
   }
 }
