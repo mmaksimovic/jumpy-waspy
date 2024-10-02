@@ -29,6 +29,11 @@ export class GameScene extends Phaser.Scene {
   private jumpBufferTime: number = 150; // Buffer time in milliseconds
   private lastJumpPressTime: number = 0;
   private cameraLerpFactor: number = 0.1; // New property for smooth camera movement
+  private score: number = 0;
+  private scoreText!: Phaser.GameObjects.Text;
+  private lastScoreY: number = 0;
+  private difficultyLevel: number = 0;
+  private readonly pointsPerDifficultyIncrease: number = 20;
 
   constructor() {
     super('GameScene')
@@ -105,6 +110,21 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 5; i++) {
       this.spawnCloud()
     }
+
+    // Add score text
+    this.scoreText = this.add.text(16, 16, 'Score: 0', {
+      fontSize: '32px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 3
+    });
+    this.scoreText.setScrollFactor(0);
+    this.scoreText.setDepth(20);
+
+    this.lastScoreY = this.player.y;
+
+    // Initialize difficulty
+    this.updateDifficulty();
   }
 
   update(time: number, delta: number) {
@@ -202,6 +222,12 @@ export class GameScene extends Phaser.Scene {
 
     // Update the background position
     this.background.tilePositionY = this.cameras.main.scrollY
+
+    // Update score
+    this.updateScore();
+
+    // Update difficulty
+    this.updateDifficulty();
   }
 
   private handlePlatformCollision = (player: Phaser.Types.Physics.Arcade.GameObjectWithBody, platform: Phaser.Types.Physics.Arcade.GameObjectWithBody) => {
@@ -274,10 +300,11 @@ export class GameScene extends Phaser.Scene {
     const y = this.nextPlatformY - this.platformSpacing
     
     // Determine if this line can have a danger pad
-    const canHaveDangerPad = this.lineCounter - this.lastDangerLine >= 2
+    const canHaveDangerPad = this.lineCounter - this.lastDangerLine >= 2;
 
-    // 50% chance for a danger pad if allowed
-    const isDangerPad = canHaveDangerPad && Phaser.Math.Between(0, 1) === 0
+    // Increase chance of danger pad based on difficulty
+    const dangerPadChance = 0.3 + (this.difficultyLevel * 0.05); // 30% base chance, increasing by 5% per level
+    const isDangerPad = canHaveDangerPad && Math.random() < dangerPadChance;
 
     if (isDangerPad) {
       // If we have a danger pad, the other one must be safe
@@ -356,6 +383,22 @@ export class GameScene extends Phaser.Scene {
         });
       }
     });
+
+    // Display final score
+    const finalScoreText = this.add.text(
+      this.cameras.main.worldView.centerX, 
+      this.cameras.main.worldView.centerY, 
+      `Final Score: ${this.score}`, 
+      {
+        fontSize: '48px',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 4
+      }
+    );
+    finalScoreText.setOrigin(0.5);
+    finalScoreText.setScrollFactor(0);
+    finalScoreText.setDepth(30);
   }
 
   private spawnCloud() {
@@ -386,5 +429,37 @@ export class GameScene extends Phaser.Scene {
     const currentY = this.cameras.main.scrollY;
     const newY = Phaser.Math.Linear(currentY, targetY, this.cameraLerpFactor);
     this.cameras.main.setScroll(this.cameras.main.scrollX, newY);
+  }
+
+  private updateScore() {
+    const currentY = this.player.y;
+    if (currentY < this.lastScoreY - this.platformSpacing) {
+      this.score++;
+      this.scoreText.setText(`Score: ${this.score} (Level ${this.difficultyLevel + 1})`);
+      this.lastScoreY = currentY;
+    }
+  }
+
+  private updateDifficulty() {
+    const newDifficultyLevel = Math.floor(this.score / this.pointsPerDifficultyIncrease);
+    if (newDifficultyLevel > this.difficultyLevel) {
+      this.difficultyLevel = newDifficultyLevel;
+      this.applyDifficultyChanges();
+    }
+  }
+
+  private applyDifficultyChanges() {
+    // Increase player speed
+    this.playerSpeed = 300 + (this.difficultyLevel * 20);
+
+    // Decrease platform width range
+    this.minPlatformWidth = Math.max(50, 80 - (this.difficultyLevel * 2));
+    this.maxPlatformWidth = Math.max(200, 400 - (this.difficultyLevel * 10));
+
+    // Increase platform spacing
+    this.platformSpacing = 220 + (this.difficultyLevel * 5);
+
+    // Increase chance of danger pads
+    // We'll implement this in the addPlatform method
   }
 }
