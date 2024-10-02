@@ -25,6 +25,10 @@ export class GameScene extends Phaser.Scene {
   private gameStartTime: number = 0;
   private lineCounter: number = 0;
   private lastDangerLine: number = -2; // Initialize to -2 to allow a danger pad on the first or second line
+  private jumpPressed: boolean = false;
+  private jumpBufferTime: number = 150; // Buffer time in milliseconds
+  private lastJumpPressTime: number = 0;
+  private cameraLerpFactor: number = 0.1; // New property for smooth camera movement
 
   constructor() {
     super('GameScene')
@@ -80,12 +84,13 @@ export class GameScene extends Phaser.Scene {
     // Set the world bounds to be very tall
     this.physics.world.setBounds(0, -10000, 800, 20600)
 
-    // Make the camera follow the player vertically
-    this.cameras.main.startFollow(this.player, true, 0, 1)
-    this.cameras.main.setDeadzone(100, 200)
+    // Update camera follow settings
+    this.cameras.main.startFollow(this.player, false, 0.5, 0.5);
+    this.cameras.main.setLerp(this.cameraLerpFactor, this.cameraLerpFactor);
+    this.cameras.main.setDeadzone(100, 200);
     
     // Set the camera bounds
-    this.cameras.main.setBounds(0, -10000, 800, 20600)
+    this.cameras.main.setBounds(0, -10000, 800, 20600);
 
     // Store the game start time
     this.gameStartTime = this.time.now;
@@ -120,17 +125,22 @@ export class GameScene extends Phaser.Scene {
       this.player.setVelocityX(0)
     }
 
-    // Update last grounded time
-    if (this.player.body!.touching.down) {
-      this.lastGroundedTime = time;
+    // Jump input handling
+    if (this.cursors.up.isDown && !this.jumpPressed) {
+      this.jumpPressed = true;
+      this.lastJumpPressTime = time;
+    }
+    if (this.cursors.up.isUp) {
+      this.jumpPressed = false;
     }
 
-    // Modify the jump condition to include coyote time
-    if (this.cursors.up.isDown && (time - this.lastGroundedTime < this.coyoteTime)) {
-      if (this.player.body!.velocity.y >= 0) { // Only jump if not already jumping
-        this.player.setVelocityY(this.jumpVelocity);
-        this.jumpTimer = 0; // Reset jump timer when starting a new jump
-      }
+    // Jump logic
+    const canJump = this.player.body!.touching.down || (time - this.lastGroundedTime < this.coyoteTime);
+    if ((this.jumpPressed && canJump) || (canJump && time - this.lastJumpPressTime < this.jumpBufferTime)) {
+      this.player.setVelocityY(this.jumpVelocity);
+      this.jumpTimer = 0;
+      this.lastGroundedTime = 0; // Reset coyote time
+      this.lastJumpPressTime = 0; // Reset jump buffer
     } else if (this.cursors.up.isDown && this.jumpTimer < this.maxJumpTime) {
       // Continue to apply upward force while the up key is held and within max jump time
       this.jumpTimer += delta;
@@ -140,6 +150,11 @@ export class GameScene extends Phaser.Scene {
       // If the up key is released while still moving upwards, reduce the upward velocity
       this.player.setVelocityY(this.player.body!.velocity.y * 0.5);
       this.jumpTimer = this.maxJumpTime; // End the jump
+    }
+
+    // Update last grounded time
+    if (this.player.body!.touching.down) {
+      this.lastGroundedTime = time;
     }
 
     // Add new platforms as the player moves up
@@ -175,11 +190,15 @@ export class GameScene extends Phaser.Scene {
       }
     })
 
-    // Game over if player falls below the camera view
-    if (this.player.y > this.cameras.main.scrollY + this.cameras.main.height) {
-      this.playerFell()
+    // Game over if player falls below two platform levels from the bottom of the screen
+    const bottomOfScreen = this.cameras.main.scrollY + this.cameras.main.height;
+    if (this.player.y > bottomOfScreen + this.platformSpacing * 2) {
+      this.playerFell();
       return;
     }
+
+    // Update camera position smoothly
+    this.updateCameraPosition();
 
     // Update the background position
     this.background.tilePositionY = this.cameras.main.scrollY
@@ -297,45 +316,46 @@ export class GameScene extends Phaser.Scene {
 
   private hitDangerPad = (_player: Phaser.Types.Physics.Arcade.GameObjectWithBody): void => {
     if (!this.isGameOver) {
-      this.gameOver(_player as Phaser.Physics.Arcade.Sprite)
+      this.isGameOver = true;
+      this.gameOver(_player as Phaser.Physics.Arcade.Sprite);
     }
   }
 
   private playerFell = (): void => {
     if (!this.isGameOver) {
-      this.gameOver(this.player)
+      this.isGameOver = true;
+      this.gameOver(this.player);
     }
   }
 
   private gameOver(player: Phaser.Physics.Arcade.Sprite): void {
-    this.isGameOver = true
-
-    // Disable player input
-    if (player.body) {
-      player.body.velocity.set(0, 0);
-      (player.body as Phaser.Physics.Arcade.Body).allowGravity = false;
-    }
+    // Disable player input and physics
+    player.setVelocity(0, 300); // Set a downward velocity
+    player.body?.setAllowGravity(false);
 
     // Turn the player red
-    player.setTint(0xff0000)
+    player.setTint(0xff0000);
 
     // Turn the player upside down
-    player.setFlipY(true)
+    player.setFlipY(true);
 
     // Add a falling animation
+    const bottomOfScreen = this.cameras.main.scrollY + this.cameras.main.height;
+    const fallDestination = Math.min(player.y + 200, bottomOfScreen + this.platformSpacing * 2);
+    
     this.tweens.add({
       targets: player,
-      angle: 180,
-      y: this.cameras.main.scrollY + this.cameras.main.height + 100, // Fall below the screen
-      duration: 1000,
+      angle: 360, // Make a full rotation
+      y: fallDestination,
+      duration: 1500, // Longer duration for more visible fall
       ease: 'Power2',
       onComplete: () => {
         // Restart the scene after a short delay
         this.time.delayedCall(500, () => {
-          this.scene.restart()
-        })
+          this.scene.restart();
+        });
       }
-    })
+    });
   }
 
   private spawnCloud() {
@@ -359,5 +379,12 @@ export class GameScene extends Phaser.Scene {
       yoyo: true,
       repeat: -1
     })
+  }
+
+  private updateCameraPosition() {
+    const targetY = this.player.y - this.cameras.main.height * 0.6;
+    const currentY = this.cameras.main.scrollY;
+    const newY = Phaser.Math.Linear(currentY, targetY, this.cameraLerpFactor);
+    this.cameras.main.setScroll(this.cameras.main.scrollX, newY);
   }
 }
