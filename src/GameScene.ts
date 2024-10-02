@@ -8,12 +8,12 @@ export class GameScene extends Phaser.Scene {
   private playerSpeed: number = 300
   private jumpVelocity: number = -450 // Reduced from -700
   private maxJumpVelocity: number = -600 // New property for maximum jump velocity
-  private nextPlatformY: number = 0
-  private platformSpacing: number = 220 // Increased from 180
-  private platformScaleX: number = 0.7
-  private platformScaleY: number = 0.5 // Reduced from 0.7
-  private minPlatformWidth: number = 80 // Reduced from 100
-  private maxPlatformWidth: number = 400 // Increased from 300
+  private nextPlatformY: number = 600
+  private platformGap: number = 150; // Increased from 100
+  private platformScaleX: number = 0.4; // Reduced from 0.5
+  private platformScaleY: number = 0.25; // Reduced from 0.35
+  private minPlatformWidth: number = 200; // Increased from 100
+  private maxPlatformWidth: number = 400; // Increased from 200
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private lastPlatformX: number = 400
   private clouds!: Phaser.GameObjects.Group
@@ -38,9 +38,52 @@ export class GameScene extends Phaser.Scene {
   private rightButton!: Phaser.GameObjects.Rectangle;
   private jumpButton!: Phaser.GameObjects.Rectangle;
   private isMobile: boolean = false;
+  private leftButtonDown: boolean = false;
+  private rightButtonDown: boolean = false;
+  private jumpButtonDown: boolean = false;
+  private jumpZone!: Phaser.GameObjects.Zone;
+  private gameWidth: number = 800;
+  private gameHeight: number = 600;
+  private scaleFactor: number = 1;
+  private playerScale: number = 0.2;
+  private platformScale: number = 1;
+  private jumpZoneRight!: Phaser.GameObjects.Zone;
+  private jumpZoneLeft!: Phaser.GameObjects.Zone;
+  private defaultWidth: number = 800;
+  private defaultHeight: number = 600;
+  private mobileScaleFactor: number = 0.6; // New property for mobile scaling
+  private maxDifficultyLevel: number = 30; // New property to cap difficulty
+  private dangerPadChance: number = 0.3; // Increased from 0.2
+  private mobileSpeedFactor: number = 0.6; // New property to adjust speed on mobile
 
   constructor() {
     super('GameScene')
+  }
+
+  init() {
+    // Check if the game is running on a mobile device
+    this.isMobile = this.sys.game.device.input.touch && !this.sys.game.device.input.mouse;
+
+    // Get the actual screen dimensions
+    const { width, height } = this.sys.game.canvas;
+
+    if (this.isMobile) {
+      // For mobile, use a taller rectangle and apply mobile scaling
+      this.gameWidth = Math.min(width, 450);  // Limit width on very wide mobile screens
+      this.gameHeight = height;
+      this.mobileScaleFactor = Math.min(this.gameWidth / this.defaultWidth, this.gameHeight / this.defaultHeight) * 0.6;
+    } else {
+      // For desktop, keep the square aspect ratio
+      this.scaleFactor = Math.min(width / this.defaultWidth, height / this.defaultHeight);
+      this.gameWidth = this.defaultWidth;
+      this.gameHeight = this.defaultHeight;
+    }
+
+    // Calculate scale factor
+    this.scaleFactor = Math.min(width / this.gameWidth, height / this.gameHeight);
+
+    // Adjust game size
+    this.cameras.main.setViewport(0, 0, this.gameWidth * this.scaleFactor, this.gameHeight * this.scaleFactor);
   }
 
   preload() {
@@ -55,8 +98,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
+    // Adjust world bounds
+    this.physics.world.setBounds(0, -10000, this.gameWidth, this.gameHeight + 200000);
+
     // Create the background
-    this.background = this.add.tileSprite(400, 300, 800, 600, 'background')
+    this.background = this.add.tileSprite(this.gameWidth / 2, this.gameHeight / 2, this.gameWidth, this.gameHeight, 'background')
     this.background.setScrollFactor(0)
     this.background.setDepth(-1)
 
@@ -66,17 +112,25 @@ export class GameScene extends Phaser.Scene {
     this.platforms = this.physics.add.staticGroup()
     this.dangerPads = this.physics.add.staticGroup()
 
-    // Create the initial safe platform
-    const initialPlatform = this.platforms.create(400, 550, 'safe-pad-1') as Phaser.Physics.Arcade.Sprite
-    initialPlatform.setScale(this.platformScaleX, this.platformScaleY)
+    // Adjust initial platform and player positions
+    const initialPlatformY = this.gameHeight - 50 * (this.isMobile ? this.mobileScaleFactor : 1);
+    const initialPlatform = this.platforms.create(this.gameWidth / 2, initialPlatformY, 'safe-pad-1') as Phaser.Physics.Arcade.Sprite
+    initialPlatform.setScale(
+      this.platformScaleX * (this.isMobile ? this.mobileScaleFactor : this.platformScale),
+      this.platformScaleY * (this.isMobile ? this.mobileScaleFactor : this.platformScale)
+    )
     initialPlatform.refreshBody()
 
-    this.nextPlatformY = 550
+    this.nextPlatformY = initialPlatformY;
 
-    // Create the player half a level above the initial platform
-    const playerY = 550 - (this.platformSpacing / 2)
-    this.player = this.physics.add.sprite(400, playerY, 'player')
-    this.player.setScale(0.2)
+    // Create the player just above the initial platform
+    const playerY = initialPlatformY - (this.platformGap * (this.isMobile ? this.mobileScaleFactor : 1) / 2)
+    this.player = this.physics.add.sprite(this.gameWidth / 2, playerY, 'player')
+    
+    // Adjust player scale based on screen size
+    this.playerScale = this.isMobile ? 0.3 * this.mobileScaleFactor : Math.min(0.2, 0.2 * this.scaleFactor);
+    this.player.setScale(this.playerScale)
+    
     this.player.setBounce(0.1)
     this.player.setCollideWorldBounds(false)
     this.player.setDepth(10)
@@ -90,16 +144,13 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.platforms, this.handlePlatformCollision as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback)
     this.physics.add.collider(this.player, this.dangerPads, this.hitDangerPad as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback)
 
-    // Set the world bounds to be very tall
-    this.physics.world.setBounds(0, -10000, 800, 20600)
-
     // Update camera follow settings
     this.cameras.main.startFollow(this.player, false, 0.5, 0.5);
     this.cameras.main.setLerp(this.cameraLerpFactor, this.cameraLerpFactor);
     this.cameras.main.setDeadzone(100, 200);
     
-    // Set the camera bounds
-    this.cameras.main.setBounds(0, -10000, 800, 20600);
+    // Adjust camera bounds
+    this.cameras.main.setBounds(0, -10000, this.gameWidth, this.gameHeight + 20000);
 
     // Store the game start time
     this.gameStartTime = this.time.now;
@@ -130,9 +181,6 @@ export class GameScene extends Phaser.Scene {
     // Initialize difficulty
     this.updateDifficulty();
 
-    // Check if the game is running on a mobile device
-    this.isMobile = this.sys.game.device.input.touch && !this.sys.game.device.input.mouse;
-
     if (this.isMobile) {
       this.createMobileControls();
     }
@@ -158,7 +206,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Add new platforms as the player moves up
-    while (this.player.y < this.nextPlatformY + 600) {
+    while (this.player.y < this.nextPlatformY + this.gameHeight) {
       this.addPlatform()
     }
 
@@ -192,7 +240,7 @@ export class GameScene extends Phaser.Scene {
 
     // Game over if player falls below two platform levels from the bottom of the screen
     const bottomOfScreen = this.cameras.main.scrollY + this.cameras.main.height;
-    if (this.player.y > bottomOfScreen + this.platformSpacing * 2) {
+    if (this.player.y > bottomOfScreen + this.platformGap * 2) {
       this.playerFell();
       return;
     }
@@ -211,95 +259,73 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handlePlatformCollision = (player: Phaser.Types.Physics.Arcade.GameObjectWithBody, platform: Phaser.Types.Physics.Arcade.GameObjectWithBody) => {
-    const playerBody = player.body as Phaser.Physics.Arcade.Body
-    const platformBody = platform.body as Phaser.Physics.Arcade.StaticBody
+    const playerBody = player.body as Phaser.Physics.Arcade.Body;
+    const platformBody = platform.body as Phaser.Physics.Arcade.StaticBody;
 
-    if (playerBody.touching.down && playerBody.bottom <= platformBody.top + 5) {
+    if (playerBody && platformBody && playerBody.touching.down && playerBody.bottom <= platformBody.top + 5) {
       // Player is on top of the platform
-      playerBody.velocity.y = Math.max(0, playerBody.velocity.y)
-    } else {
+      playerBody.velocity.y = 0;
+      (player as Phaser.Physics.Arcade.Sprite).y = platformBody.top - playerBody.height / 2;
+      
+      // If the platform is moving, adjust player's x position
+      if (this.difficultyLevel >= 1) {
+        const platformSprite = platform as Phaser.Physics.Arcade.Sprite;
+        const platformTween = this.tweens.getTweensOf(platformSprite)[0] as Phaser.Tweens.Tween;
+        if (platformTween && platformTween.data && platformTween.data[0]) {
+          const platformVelocity = platformTween.data[0].current - platformTween.data[0].previous;
+          (player as Phaser.Physics.Arcade.Sprite).x += platformVelocity;
+        }
+      }
+    } else if (playerBody) {
       // Player hit the platform from below or the side
       if (playerBody.touching.up) {
-        playerBody.velocity.y = Math.abs(playerBody.velocity.y)
+        playerBody.velocity.y = Math.abs(playerBody.velocity.y);
       }
       if (playerBody.touching.left || playerBody.touching.right) {
-        playerBody.velocity.x = 0
+        playerBody.velocity.x = 0;
       }
     }
   }
 
   private addPlatform() {
-    const minX = this.minPlatformWidth / 2
-    const maxX = 800 - this.minPlatformWidth / 2
-    const middleX = 400
+    const scaleFactor = this.isMobile ? this.mobileScaleFactor : 1;
+    const minX = 0;
+    const maxX = this.gameWidth;
 
-    // Define platform sizes
-    const shortWidth = Phaser.Math.Between(this.minPlatformWidth, 150)
-    const mediumWidth = Phaser.Math.Between(151, 250)
-    const longWidth = Phaser.Math.Between(251, this.maxPlatformWidth)
+    // Define platform sizes (doubled)
+    const minWidth = 200 * scaleFactor; // Increased from 100
+    const maxWidth = 400 * scaleFactor; // Increased from 200
 
-    // Randomly choose platform combination
-    const combination = Phaser.Math.Between(0, 2)
-    let width1: number, width2: number
+    // Create two platforms per row
+    const platforms: { x: number, width: number, isDanger: boolean }[] = [];
 
-    switch (combination) {
-      case 0: // Short and Medium
-        width1 = shortWidth
-        width2 = mediumWidth
-        break
-      case 1: // Short and Long
-        width1 = shortWidth
-        width2 = longWidth
-        break
-      case 2: // Medium and Short
-        width1 = mediumWidth
-        width2 = shortWidth
-        break
-    }
+    // First platform
+    const width1 = Phaser.Math.Between(minWidth, maxWidth);
+    const x1 = Phaser.Math.Between(minX, Math.max(minX, maxX / 2 - width1));
+    platforms.push({ x: x1, width: width1, isDanger: false });
 
-    // Determine positions
-    let x1: number, x2: number
-    const isFirstWider = width1 > width2
+    // Second platform
+    const width2 = Phaser.Math.Between(minWidth, maxWidth);
+    const x2 = Phaser.Math.Between(Math.min(maxX - width2, maxX / 2), maxX - width2);
+    platforms.push({ x: x2, width: width2, isDanger: false });
 
-    if (isFirstWider) {
-      x1 = Phaser.Math.Between(0, 1) === 0 ? 
-        Phaser.Math.Between(minX, 200) : 
-        Phaser.Math.Between(600, maxX)
-      x2 = x1 < middleX ? 
-        Phaser.Math.Between(middleX + width2 / 2, maxX - width2 / 2) : 
-        Phaser.Math.Between(minX + width2 / 2, middleX - width2 / 2)
-    } else {
-      x2 = Phaser.Math.Between(0, 1) === 0 ? 
-        Phaser.Math.Between(minX, 200) : 
-        Phaser.Math.Between(600, maxX)
-      x1 = x2 < middleX ? 
-        Phaser.Math.Between(middleX + width1 / 2, maxX - width1 / 2) : 
-        Phaser.Math.Between(minX + width1 / 2, middleX - width1 / 2)
-    }
-
-    const y = this.nextPlatformY - this.platformSpacing
-    
     // Determine if this line can have a danger pad
-    const canHaveDangerPad = this.lineCounter - this.lastDangerLine >= 2;
-
-    // Increase chance of danger pad based on difficulty
-    const dangerPadChance = 0.3 + (this.difficultyLevel * 0.05); // 30% base chance, increasing by 5% per level
-    const isDangerPad = canHaveDangerPad && Math.random() < dangerPadChance;
-
-    if (isDangerPad) {
-      // If we have a danger pad, the other one must be safe
-      const dangerSide = Phaser.Math.Between(0, 1)
-      this.createPlatform(dangerSide === 0 ? x1 : x2, y, dangerSide === 0 ? width1 : width2, true)
-      this.createPlatform(dangerSide === 0 ? x2 : x1, y, dangerSide === 0 ? width2 : width1, false)
-      this.lastDangerLine = this.lineCounter
-    } else {
-      // If no danger pad, both are safe
-      this.createPlatform(x1, y, width1, false)
-      this.createPlatform(x2, y, width2, false)
+    const canHaveDangerPad = this.lineCounter - this.lastDangerLine >= 3;
+    if (canHaveDangerPad && Math.random() < this.dangerPadChance) {
+      const dangerIndex = Phaser.Math.Between(0, 1);
+      platforms[dangerIndex].isDanger = true;
+      this.lastDangerLine = this.lineCounter;
     }
 
-    this.nextPlatformY = y
-    this.lineCounter++
+    const y = this.nextPlatformY - this.platformGap * scaleFactor;
+
+    // Create platforms
+    platforms.forEach(platform => {
+      this.createPlatform(platform.x, y, platform.width, platform.isDanger);
+    });
+
+    this.nextPlatformY = y;
+    this.lineCounter++;
   }
 
   private createPlatform(x: number, y: number, width: number, isDanger: boolean): void {
@@ -312,13 +338,38 @@ export class GameScene extends Phaser.Scene {
       platform = this.platforms.create(x, y, safePadTexture) as Phaser.Physics.Arcade.Sprite
     }
 
-    const horizontalScale = width / platform.width
-    platform.setScale(horizontalScale, this.platformScaleY)
-    const platformHeight = platform.height * this.platformScaleY
+    const scaleFactor = this.isMobile ? this.mobileScaleFactor : this.platformScale;
+    const horizontalScale = (width / platform.width) * this.platformScaleX * scaleFactor
+    const verticalScale = this.platformScaleY * scaleFactor
+    platform.setScale(horizontalScale, verticalScale)
+    const platformHeight = platform.height * verticalScale
     platform.setSize(width, platformHeight)
     platform.setOffset((platform.width - width) / 2, (platform.height - platformHeight) / 2)
     platform.setDepth(5)
     platform.refreshBody()
+
+    if (this.difficultyLevel >= 1) {
+      this.addPlatformMovement(platform);
+    }
+  }
+
+  private addPlatformMovement(platform: Phaser.Physics.Arcade.Sprite) {
+    const moveDistance = 100 * this.scaleFactor;
+    const moveDuration = 2000;
+
+    this.tweens.add({
+      targets: platform,
+      x: platform.x + moveDistance,
+      duration: moveDuration,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: -1,
+      onUpdate: () => {
+        if (platform.body) {
+          platform.body.updateFromGameObject();
+        }
+      }
+    });
   }
 
   private hitDangerPad = (_player: Phaser.Types.Physics.Arcade.GameObjectWithBody): void => {
@@ -348,7 +399,7 @@ export class GameScene extends Phaser.Scene {
 
     // Add a falling animation
     const bottomOfScreen = this.cameras.main.scrollY + this.cameras.main.height;
-    const fallDestination = Math.min(player.y + 200, bottomOfScreen + this.platformSpacing * 2);
+    const fallDestination = Math.min(player.y + 200, bottomOfScreen + this.platformGap * 2);
     
     this.tweens.add({
       targets: player,
@@ -382,7 +433,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnCloud() {
-    const x = Phaser.Math.Between(0, 800)
+    const x = Phaser.Math.Between(0, this.gameWidth)
     const y = this.player ? this.player.y - 600 - Phaser.Math.Between(0, 200) : Phaser.Math.Between(0, 600)
     const cloudType = Phaser.Math.Between(1, 3)
     const cloud = this.add.image(x, y, `cloud${cloudType}`)
@@ -413,7 +464,7 @@ export class GameScene extends Phaser.Scene {
 
   private updateScore() {
     const currentY = this.player.y;
-    if (currentY < this.lastScoreY - this.platformSpacing) {
+    if (currentY < this.lastScoreY - this.platformGap) {
       this.score++;
       this.scoreText.setText(`Score: ${this.score} (Level ${this.difficultyLevel + 1})`);
       this.lastScoreY = currentY;
@@ -422,72 +473,120 @@ export class GameScene extends Phaser.Scene {
 
   private updateDifficulty() {
     const newDifficultyLevel = Math.floor(this.score / this.pointsPerDifficultyIncrease);
-    if (newDifficultyLevel > this.difficultyLevel) {
+    if (newDifficultyLevel > this.difficultyLevel && newDifficultyLevel <= this.maxDifficultyLevel) {
       this.difficultyLevel = newDifficultyLevel;
       this.applyDifficultyChanges();
     }
   }
 
   private applyDifficultyChanges() {
-    // Increase player speed
-    this.playerSpeed = 300 + (this.difficultyLevel * 20);
+    const scaleFactor = this.isMobile ? this.mobileScaleFactor : 1;
+    
+    // Increase player speed (adjust based on player scale and mobile factor)
+    this.playerSpeed = Math.min(500, (300 + (this.difficultyLevel * 5)) * scaleFactor);
 
-    // Decrease platform width range
-    this.minPlatformWidth = Math.max(50, 80 - (this.difficultyLevel * 2));
-    this.maxPlatformWidth = Math.max(200, 400 - (this.difficultyLevel * 10));
+    // Adjust platform gap based on difficulty
+    this.platformGap = Math.max(120, 150 - (this.difficultyLevel * 1));
 
-    // Increase platform spacing
-    this.platformSpacing = 220 + (this.difficultyLevel * 5);
+    // Adjust jump velocity and max jump velocity
+    this.jumpVelocity = Math.max(-500, -450 - (this.difficultyLevel * 2));
+    this.maxJumpVelocity = Math.max(-600, -550 - (this.difficultyLevel * 2));
 
-    // Increase chance of danger pads
-    // We'll implement this in the addPlatform method
+    // Increase chance of danger pads (capped at 60%)
+    this.dangerPadChance = Math.min(0.6, 0.3 + (this.difficultyLevel * 0.02));
   }
 
   private createMobileControls() {
     const buttonColor = 0x0000ff;
     const buttonAlpha = 0.5;
-    const buttonWidth = 100;
-    const buttonHeight = 100;
+    const buttonWidth = 80 * this.scaleFactor;
+    const buttonHeight = 80 * this.scaleFactor;
+    const buttonMargin = 20 * this.scaleFactor;
 
     // Create left button
-    this.leftButton = this.add.rectangle(50, this.cameras.main.height - 75, buttonWidth, buttonHeight, buttonColor)
+    this.leftButton = this.add.rectangle(buttonMargin + buttonWidth / 2, this.gameHeight - buttonMargin - buttonHeight / 2, buttonWidth, buttonHeight, buttonColor)
       .setScrollFactor(0)
       .setAlpha(buttonAlpha)
-      .setInteractive();
+      .setInteractive()
+      .setDepth(10);
 
     // Create right button
-    this.rightButton = this.add.rectangle(175, this.cameras.main.height - 75, buttonWidth, buttonHeight, buttonColor)
+    this.rightButton = this.add.rectangle(buttonMargin * 2 + buttonWidth * 1.5, this.gameHeight - buttonMargin - buttonHeight / 2, buttonWidth, buttonHeight, buttonColor)
       .setScrollFactor(0)
       .setAlpha(buttonAlpha)
-      .setInteractive();
-
-    // Create jump button
-    this.jumpButton = this.add.rectangle(this.cameras.main.width - 75, this.cameras.main.height - 75, buttonWidth, buttonHeight, buttonColor)
-      .setScrollFactor(0)
-      .setAlpha(buttonAlpha)
-      .setInteractive();
+      .setInteractive()
+      .setDepth(10);
 
     // Add text to buttons
-    this.add.text(50, this.cameras.main.height - 75, 'Left', { color: '#ffffff' })
+    this.add.text(buttonMargin + buttonWidth / 2, this.gameHeight - buttonMargin - buttonHeight / 2, 'Left', { 
+      color: '#ffffff',
+      fontSize: `${18 * this.scaleFactor}px`
+    })
       .setOrigin(0.5)
-      .setScrollFactor(0);
-    this.add.text(175, this.cameras.main.height - 75, 'Right', { color: '#ffffff' })
+      .setScrollFactor(0)
+      .setDepth(11);
+
+    this.add.text(buttonMargin * 2 + buttonWidth * 1.5, this.gameHeight - buttonMargin - buttonHeight / 2, 'Right', { 
+      color: '#ffffff',
+      fontSize: `${18 * this.scaleFactor}px`
+    })
       .setOrigin(0.5)
-      .setScrollFactor(0);
-    this.add.text(this.cameras.main.width - 75, this.cameras.main.height - 75, 'Jump', { color: '#ffffff' })
-      .setOrigin(0.5)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setDepth(11);
+
+    // Create jump zones for left and right sides of the screen
+    this.jumpZoneLeft = this.add.zone(0, 0, this.gameWidth / 2, this.gameHeight - buttonHeight - buttonMargin * 2)
+      .setOrigin(0)
+      .setInteractive()
+      .setScrollFactor(0)
+      .setDepth(9);
+    this.jumpZoneRight = this.add.zone(this.gameWidth / 2, 0, this.gameWidth / 2, this.gameHeight - buttonHeight - buttonMargin * 2)
+      .setOrigin(0)
+      .setInteractive()
+      .setScrollFactor(0)
+      .setDepth(9);
+
+    // Add touch event listeners
+    this.leftButton.on('pointerdown', () => { this.leftButtonDown = true; });
+    this.leftButton.on('pointerup', () => { this.leftButtonDown = false; });
+    this.leftButton.on('pointerout', () => { this.leftButtonDown = false; });
+
+    this.rightButton.on('pointerdown', () => { this.rightButtonDown = true; });
+    this.rightButton.on('pointerup', () => { this.rightButtonDown = false; });
+    this.rightButton.on('pointerout', () => { this.rightButtonDown = false; });
+
+    // Add jump zone event listeners
+    const handleJumpZone = (pointer: Phaser.Input.Pointer) => {
+      if (!this.leftButton.getBounds().contains(pointer.x, pointer.y) &&
+          !this.rightButton.getBounds().contains(pointer.x, pointer.y)) {
+        this.jumpButtonDown = true;
+      }
+    };
+
+    this.jumpZoneLeft.on('pointerdown', handleJumpZone);
+    this.jumpZoneRight.on('pointerdown', handleJumpZone);
+
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (!this.leftButton.getBounds().contains(pointer.x, pointer.y) &&
+          !this.rightButton.getBounds().contains(pointer.x, pointer.y)) {
+        this.jumpButtonDown = false;
+      }
+    });
+
+    // Ensure the jump zones are behind the movement buttons
+    this.jumpZoneLeft.setDepth(-1);
+    this.jumpZoneRight.setDepth(-1);
   }
 
   private handleMobileControls() {
     // Handle left movement
-    if (this.leftButton.input?.isDown) {
-      this.player.setVelocityX(-this.playerSpeed);
+    if (this.leftButtonDown) {
+      this.player.setVelocityX(-this.playerSpeed * this.mobileSpeedFactor);
       this.player.setFlipX(true);
     }
     // Handle right movement
-    else if (this.rightButton.input?.isDown) {
-      this.player.setVelocityX(this.playerSpeed);
+    else if (this.rightButtonDown) {
+      this.player.setVelocityX(this.playerSpeed * this.mobileSpeedFactor);
       this.player.setFlipX(false);
     }
     // Stop horizontal movement if no direction button is pressed
@@ -496,9 +595,14 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Handle jump
-    if (this.jumpButton.input?.isDown) {
-      this.handleJump();
+    if (this.jumpButtonDown && !this.jumpPressed) {
+      this.jumpPressed = true;
+      this.lastJumpPressTime = this.time.now;
+    } else if (!this.jumpButtonDown) {
+      this.jumpPressed = false;
     }
+
+    this.handleJump();
   }
 
   private handleKeyboardControls() {
