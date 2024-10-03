@@ -42,8 +42,8 @@ export class GameScene extends Phaser.Scene {
   private rightButtonDown: boolean = false;
   private jumpButtonDown: boolean = false;
   private jumpZone!: Phaser.GameObjects.Zone;
-  private gameWidth: number = 1600;
-  private gameHeight: number = 1200;
+  private gameWidth: number = 800;
+  private gameHeight: number = 600;
   private scaleFactor: number = 1;
   private playerScale: number = 0.2;
   private platformScale: number = 1;
@@ -154,7 +154,7 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setDeadzone(100, 200);
     
     // Adjust camera bounds
-    this.cameras.main.setBounds(0, -10000, this.gameWidth, this.gameHeight + 20000);
+    this.cameras.main.setBounds(0, -Infinity, this.gameWidth, Infinity);
 
     // Store the game start time
     this.gameStartTime = this.time.now;
@@ -266,7 +266,7 @@ export class GameScene extends Phaser.Scene {
     const playerBody = player.body as Phaser.Physics.Arcade.Body;
     const platformBody = platform.body as Phaser.Physics.Arcade.StaticBody;
 
-    if (playerBody && platformBody && playerBody.touching.down && playerBody.bottom <= platformBody.top + 5) {
+    if (playerBody && platformBody && playerBody.touching.down && playerBody.bottom <= platformBody.top + 10) {
       // Player is on top of the platform
       playerBody.velocity.y = 0;
       (player as Phaser.Physics.Arcade.Sprite).y = platformBody.top - playerBody.height / 2;
@@ -350,6 +350,8 @@ export class GameScene extends Phaser.Scene {
     platform.setSize(width, platformHeight)
     platform.setOffset((platform.width - width) / 2, (platform.height - platformHeight) / 2)
     platform.setDepth(5)
+    
+    // Refresh the physics body to ensure correct collision detection
     platform.refreshBody()
 
     if (this.difficultyLevel >= 1) {
