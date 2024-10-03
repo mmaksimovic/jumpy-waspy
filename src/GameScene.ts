@@ -42,19 +42,23 @@ export class GameScene extends Phaser.Scene {
   private rightButtonDown: boolean = false;
   private jumpButtonDown: boolean = false;
   private jumpZone!: Phaser.GameObjects.Zone;
-  private gameWidth: number = 800;
-  private gameHeight: number = 600;
+  private gameWidth: number = 1600;
+  private gameHeight: number = 1200;
   private scaleFactor: number = 1;
   private playerScale: number = 0.2;
   private platformScale: number = 1;
   private jumpZoneRight!: Phaser.GameObjects.Zone;
   private jumpZoneLeft!: Phaser.GameObjects.Zone;
-  private defaultWidth: number = 800;
-  private defaultHeight: number = 600;
+  private defaultWidth: number = 1600;
+  private defaultHeight: number = 1200;
   private mobileScaleFactor: number = 0.6; // New property for mobile scaling
   private maxDifficultyLevel: number = 30; // New property to cap difficulty
   private dangerPadChance: number = 0.3; // Increased from 0.2
   private mobileSpeedFactor: number = 0.6; // New property to adjust speed on mobile
+  private mobilePlatformScaleX: number = 0.8; // New property for mobile platform horizontal scale
+  private mobilePlatformScaleY: number = 0.5; // New property for mobile platform vertical scale
+  private touchStartX: number = 0;
+  private touchStartY: number = 0;
 
   constructor() {
     super('GameScene')
@@ -99,7 +103,7 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     // Adjust world bounds
-    this.physics.world.setBounds(0, -10000, this.gameWidth, this.gameHeight + 200000);
+    this.physics.world.setBounds(0, -Infinity, this.gameWidth, this.gameHeight + Infinity);
 
     // Create the background
     this.background = this.add.tileSprite(this.gameWidth / 2, this.gameHeight / 2, this.gameWidth, this.gameHeight, 'background')
@@ -292,9 +296,9 @@ export class GameScene extends Phaser.Scene {
     const minX = 0;
     const maxX = this.gameWidth;
 
-    // Define platform sizes (doubled)
-    const minWidth = 200 * scaleFactor; // Increased from 100
-    const maxWidth = 400 * scaleFactor; // Increased from 200
+    // Define platform sizes (adjusted for mobile)
+    const minWidth = this.isMobile ? 250 * scaleFactor : 200 * scaleFactor;
+    const maxWidth = this.isMobile ? 450 * scaleFactor : 400 * scaleFactor;
 
     // Create two platforms per row
     const platforms: { x: number, width: number, isDanger: boolean }[] = [];
@@ -339,8 +343,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     const scaleFactor = this.isMobile ? this.mobileScaleFactor : this.platformScale;
-    const horizontalScale = (width / platform.width) * this.platformScaleX * scaleFactor
-    const verticalScale = this.platformScaleY * scaleFactor
+    const horizontalScale = (width / platform.width) * (this.isMobile ? this.mobilePlatformScaleX : this.platformScaleX) * scaleFactor
+    const verticalScale = (this.isMobile ? this.mobilePlatformScaleY : this.platformScaleY) * scaleFactor
     platform.setScale(horizontalScale, verticalScale)
     const platformHeight = platform.height * verticalScale
     platform.setSize(width, platformHeight)
@@ -497,103 +501,37 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createMobileControls() {
-    const buttonColor = 0x0000ff;
-    const buttonAlpha = 0.5;
-    const buttonWidth = 80 * this.scaleFactor;
-    const buttonHeight = 80 * this.scaleFactor;
-    const buttonMargin = 20 * this.scaleFactor;
+    // Remove existing button creation code
 
-    // Create left button
-    this.leftButton = this.add.rectangle(buttonMargin + buttonWidth / 2, this.gameHeight - buttonMargin - buttonHeight / 2, buttonWidth, buttonHeight, buttonColor)
-      .setScrollFactor(0)
-      .setAlpha(buttonAlpha)
-      .setInteractive()
-      .setDepth(10);
-
-    // Create right button
-    this.rightButton = this.add.rectangle(buttonMargin * 2 + buttonWidth * 1.5, this.gameHeight - buttonMargin - buttonHeight / 2, buttonWidth, buttonHeight, buttonColor)
-      .setScrollFactor(0)
-      .setAlpha(buttonAlpha)
-      .setInteractive()
-      .setDepth(10);
-
-    // Add text to buttons
-    this.add.text(buttonMargin + buttonWidth / 2, this.gameHeight - buttonMargin - buttonHeight / 2, 'Left', { 
-      color: '#ffffff',
-      fontSize: `${18 * this.scaleFactor}px`
-    })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(11);
-
-    this.add.text(buttonMargin * 2 + buttonWidth * 1.5, this.gameHeight - buttonMargin - buttonHeight / 2, 'Right', { 
-      color: '#ffffff',
-      fontSize: `${18 * this.scaleFactor}px`
-    })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(11);
-
-    // Create jump zones for left and right sides of the screen
-    this.jumpZoneLeft = this.add.zone(0, 0, this.gameWidth / 2, this.gameHeight - buttonHeight - buttonMargin * 2)
+    // Create a zone for the entire screen
+    this.jumpZone = this.add.zone(0, 0, this.gameWidth, this.gameHeight)
       .setOrigin(0)
       .setInteractive()
-      .setScrollFactor(0)
-      .setDepth(9);
-    this.jumpZoneRight = this.add.zone(this.gameWidth / 2, 0, this.gameWidth / 2, this.gameHeight - buttonHeight - buttonMargin * 2)
-      .setOrigin(0)
-      .setInteractive()
-      .setScrollFactor(0)
-      .setDepth(9);
+      .setScrollFactor(0);
 
     // Add touch event listeners
-    this.leftButton.on('pointerdown', () => { this.leftButtonDown = true; });
-    this.leftButton.on('pointerup', () => { this.leftButtonDown = false; });
-    this.leftButton.on('pointerout', () => { this.leftButtonDown = false; });
+    this.input.on('pointerdown', this.handleTouchStart, this);
+    this.input.on('pointermove', this.handleTouchMove, this);
+    this.input.on('pointerup', this.handleTouchEnd, this);
+  }
 
-    this.rightButton.on('pointerdown', () => { this.rightButtonDown = true; });
-    this.rightButton.on('pointerup', () => { this.rightButtonDown = false; });
-    this.rightButton.on('pointerout', () => { this.rightButtonDown = false; });
+  private handleTouchStart = (pointer: Phaser.Input.Pointer) => {
+    this.touchStartX = pointer.x;
+    this.touchStartY = pointer.y;
+    this.jumpButtonDown = true;
+  }
 
-    // Add jump zone event listeners
-    const handleJumpZone = (pointer: Phaser.Input.Pointer) => {
-      if (!this.leftButton.getBounds().contains(pointer.x, pointer.y) &&
-          !this.rightButton.getBounds().contains(pointer.x, pointer.y)) {
-        this.jumpButtonDown = true;
-      }
-    };
+  private handleTouchMove = (pointer: Phaser.Input.Pointer) => {
+    const deltaX = pointer.x - this.touchStartX;
+    this.player.x += deltaX * 0.5; // Adjust the multiplier to control sensitivity
+    this.touchStartX = pointer.x;
+  }
 
-    this.jumpZoneLeft.on('pointerdown', handleJumpZone);
-    this.jumpZoneRight.on('pointerdown', handleJumpZone);
-
-    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (!this.leftButton.getBounds().contains(pointer.x, pointer.y) &&
-          !this.rightButton.getBounds().contains(pointer.x, pointer.y)) {
-        this.jumpButtonDown = false;
-      }
-    });
-
-    // Ensure the jump zones are behind the movement buttons
-    this.jumpZoneLeft.setDepth(-1);
-    this.jumpZoneRight.setDepth(-1);
+  private handleTouchEnd = () => {
+    this.jumpButtonDown = false;
   }
 
   private handleMobileControls() {
-    // Handle left movement
-    if (this.leftButtonDown) {
-      this.player.setVelocityX(-this.playerSpeed * this.mobileSpeedFactor);
-      this.player.setFlipX(true);
-    }
-    // Handle right movement
-    else if (this.rightButtonDown) {
-      this.player.setVelocityX(this.playerSpeed * this.mobileSpeedFactor);
-      this.player.setFlipX(false);
-    }
-    // Stop horizontal movement if no direction button is pressed
-    else {
-      this.player.setVelocityX(0);
-    }
-
     // Handle jump
     if (this.jumpButtonDown && !this.jumpPressed) {
       this.jumpPressed = true;
